@@ -28,11 +28,11 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://djjpgtykdxrlhtkupmqj.supabase.co';
   const supabaseAnonKey =
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    'placeholder-anon-key';
+    'sb_publishable_VUfxhtOVAiJX379nYTPfkQ_DjFlLz9V';
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
