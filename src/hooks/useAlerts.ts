@@ -45,9 +45,10 @@ export function useAlerts() {
   const [alerts, setAlerts] = useState<AlertItem[]>(DEFAULT_DEMO_NOTIFICATIONS);
   const [loading, setLoading] = useState(true);
   const [lastLiveEvent, setLastLiveEvent] = useState<string | null>(null);
-  const supabase = createClient();
 
   useEffect(() => {
+    const supabase = createClient();
+
     async function fetchAlerts() {
       try {
         const { data, error } = await (supabase.from('alerts') as any)
@@ -164,7 +165,7 @@ export function useAlerts() {
       supabase.removeChannel(alertsChannel);
       supabase.removeChannel(zonesChannel);
     };
-  }, [supabase]);
+  }, []);
 
   return { alerts, loading, lastLiveEvent };
 }
