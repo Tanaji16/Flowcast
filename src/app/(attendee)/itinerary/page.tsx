@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +12,38 @@ import { Calendar, QrCode, Clock, MapPin, Shuffle, CheckCircle2, AlertCircle } f
 export default function ItineraryPage() {
   const [selectedDay, setSelectedDay] = useState<'day1' | 'day2' | 'day3'>('day1');
   const [activeModalItem, setActiveModalItem] = useState<any | null>(null);
+  const [dbBookings, setDbBookings] = useState<any[]>([]);
+  const [liveZones, setLiveZones] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function loadItineraryData() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        // 1. Query bookings table
+        if (user) {
+          const { data: bookings } = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('user_id', user.id);
+          if (bookings && bookings.length > 0) {
+            setDbBookings(bookings);
+          }
+        }
+
+        // 2. Query zones table for live occupancy
+        const { data: zones } = await supabase.from('zones').select('*');
+        if (zones && zones.length > 0) {
+          setLiveZones(zones);
+        }
+      } catch (err) {
+        console.warn('Itinerary Supabase load error:', err);
+      }
+    }
+
+    loadItineraryData();
+  }, []);
 
   const SCHEDULE_ITEMS = [
     {
@@ -28,7 +61,7 @@ export default function ItineraryPage() {
       title: 'Keynote: Intelligent Spatial Flow & Urban Scale Infrastructure',
       location: 'Plenary Hall A',
       status: 'upcoming',
-      occupancy: 82,
+      occupancy: liveZones.find(z => z.name?.includes('Plenary'))?.occupancy_percent || 82,
       congestion: 'moderate',
       passId: 'PASS-9483',
     },
@@ -38,7 +71,7 @@ export default function ItineraryPage() {
       title: 'Networking Lunch & Expo Showcase',
       location: 'Dining Pavilion 2 (Alternative Low-Queue Hub)',
       status: 'upcoming',
-      occupancy: 38,
+      occupancy: liveZones.find(z => z.name?.includes('Food') || z.name?.includes('Dining'))?.occupancy_percent || 38,
       congestion: 'safe',
       passId: 'PASS-9484',
     },
@@ -56,24 +89,23 @@ export default function ItineraryPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="font-bold text-2xl text-on-surface tracking-tight">Full Event Schedule</h1>
+          <h1 className="font-bold text-2xl text-on-surface tracking-tight">Smart Attendee Schedule</h1>
           <p className="text-xs text-on-surface-variant mt-0.5">
-            Personalized agenda synchronized with real-time zone congestion telemetry.
+            Synchronized with live turnstile occupancy to recommend optimal transit departures.
           </p>
         </div>
-        
-        {/* Day Selector Tabs */}
+
+        {/* Day Selector */}
         <div className="inline-flex rounded-full bg-surface-container p-1 self-start sm:self-auto">
           {(['day1', 'day2', 'day3'] as const).map((day, idx) => (
             <button
               key={day}
               onClick={() => setSelectedDay(day)}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold capitalize transition-all cursor-pointer ${
                 selectedDay === day
-                  ? 'bg-white text-on-surface shadow-xs font-bold'
+                  ? 'bg-primary-container text-white shadow-xs'
                   : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
@@ -86,76 +118,86 @@ export default function ItineraryPage() {
       {/* Schedule Items List */}
       <div className="space-y-4">
         {SCHEDULE_ITEMS.map((item) => (
-          <Card key={item.id} className="p-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-bold text-on-surface">{item.time}</span>
-                  <span className="text-on-surface-variant">•</span>
-                  <Badge
-                    variant={
-                      item.status === 'completed'
-                        ? 'teal'
-                        : item.congestion === 'moderate'
-                        ? 'amber'
-                        : 'teal'
-                    }
-                  >
-                    {item.status === 'completed'
-                      ? 'Completed'
-                      : `Occupancy ${item.occupancy}%`}
-                  </Badge>
+          <Card key={item.id} className="p-5 hover:border-secondary/40 transition-colors">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1.5 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-on-surface flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-secondary" />
+                    {item.time}
+                  </span>
+                  {item.status === 'completed' ? (
+                    <Badge variant="teal">Completed</Badge>
+                  ) : item.occupancy >= 80 ? (
+                    <Badge variant="coral">Crowd Advisory: {item.occupancy}% Full</Badge>
+                  ) : (
+                    <Badge variant="neutral">Scheduled</Badge>
+                  )}
                 </div>
+
                 <h3 className="font-bold text-base text-on-surface">{item.title}</h3>
-                <div className="flex items-center gap-1.5 text-xs text-on-surface-variant">
-                  <MapPin className="w-3.5 h-3.5 text-secondary" />
-                  <span>{item.location}</span>
-                </div>
+                <p className="text-xs text-on-surface-variant flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-outline" />
+                  {item.location}
+                </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 pt-2 sm:pt-0">
+                {item.occupancy >= 80 && (
+                  <Link href="/alternatives">
+                    <Button variant="secondary" size="sm" className="text-xs">
+                      <Shuffle className="w-3.5 h-3.5 mr-1" />
+                      <span>Reroute</span>
+                    </Button>
+                  </Link>
+                )}
                 <Button
-                  variant="secondary"
                   size="sm"
                   onClick={() => setActiveModalItem(item)}
+                  className="text-xs cursor-pointer"
                 >
-                  <QrCode className="w-3.5 h-3.5 mr-1" />
-                  <span>FastTrack Pass</span>
+                  <QrCode className="w-3.5 h-3.5 mr-1.5" />
+                  <span>View Pass</span>
                 </Button>
-                <Link href="/alternatives">
-                  <Button variant="ghost" size="sm">
-                    <Shuffle className="w-3.5 h-3.5 mr-1" />
-                    <span>Alternatives</span>
-                  </Button>
-                </Link>
               </div>
             </div>
           </Card>
         ))}
       </div>
 
-      {/* QR Pass Modal */}
+      {/* Modal for QR Pass */}
       <Modal
         isOpen={!!activeModalItem}
         onClose={() => setActiveModalItem(null)}
-        title="FastTrack Access Pass"
-        description="Present this verified QR code at gate turnstiles for contact-free entry"
+        title="Digital FastTrack Access Pass"
       >
         {activeModalItem && (
-          <div className="flex flex-col items-center justify-center p-4 text-center space-y-4">
-            <div className="p-4 bg-white rounded-2xl border-2 border-dashed border-primary-container shadow-sm">
-              {/* Stylized QR placeholder */}
-              <div className="w-44 h-44 bg-surface-container flex flex-col items-center justify-center rounded-xl p-2">
-                <QrCode className="w-32 h-32 text-charcoal" />
-                <span className="text-[10px] font-mono text-on-surface-variant mt-1">
+          <div className="space-y-4 text-center py-2">
+            <div className="p-6 rounded-2xl bg-white border border-outline-subtle inline-block shadow-sm">
+              <div className="w-44 h-44 mx-auto bg-surface-container-high rounded-xl flex flex-col items-center justify-center text-outline">
+                <QrCode className="w-28 h-28 text-charcoal stroke-1" />
+                <span className="text-[10px] font-mono text-outline mt-2 font-bold tracking-widest">
                   {activeModalItem.passId}
                 </span>
               </div>
             </div>
-            <div>
-              <h4 className="font-bold text-sm text-on-surface">{activeModalItem.title}</h4>
-              <p className="text-xs text-on-surface-variant mt-0.5">{activeModalItem.location}</p>
+
+            <div className="text-left space-y-1 bg-surface-container-low p-4 rounded-xl text-xs">
+              <div className="flex justify-between">
+                <span className="text-on-surface-variant">Session:</span>
+                <span className="font-bold text-on-surface">{activeModalItem.title}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-on-surface-variant">Venue:</span>
+                <span className="font-bold text-on-surface">{activeModalItem.location}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-on-surface-variant">Encrypted Key:</span>
+                <span className="font-mono text-secondary font-bold">SHA256: 8f4b...19a2</span>
+              </div>
             </div>
+
             <Button className="w-full" onClick={() => setActiveModalItem(null)}>
               Done
             </Button>

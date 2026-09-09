@@ -99,18 +99,51 @@ export const VENUES_DATA: EventVenue[] = [
   },
 ];
 
+import type { ZoneTelemetry } from '@/types/organizer.types';
+
 interface IndiaMapProps {
   variant?: 'attendee' | 'organizer';
   onSelectZone?: (zoneName: string) => void;
   className?: string;
+  liveZones?: ZoneTelemetry[];
 }
 
-export function IndiaMap({ variant = 'attendee', onSelectZone, className }: IndiaMapProps) {
+export function IndiaMap({ variant = 'attendee', onSelectZone, className, liveZones }: IndiaMapProps) {
   // Default coordinates requirement: India center lat: 20.5937, lng: 78.9629, zoom: 5
   const [zoom, setZoom] = useState<number>(5);
   const [selectedVenue, setSelectedVenue] = useState<EventVenue | null>(null);
   const [selectedZone, setSelectedZone] = useState<any | null>(null);
   const [activeLayer, setActiveLayer] = useState<'density' | 'sanctuary'>('density');
+
+  // Compute live mapped zones for selected venue if liveZones provided
+  const displayZones = React.useMemo(() => {
+    if (!selectedVenue) return [];
+    if (!liveZones || liveZones.length === 0) return selectedVenue.zones;
+
+    return selectedVenue.zones.map((vz) => {
+      const match = liveZones.find(
+        (lz) =>
+          lz.name.toLowerCase().includes(vz.name.toLowerCase()) ||
+          vz.name.toLowerCase().includes(lz.name.toLowerCase()) ||
+          lz.id === vz.id
+      );
+      if (match) {
+        return {
+          ...vz,
+          occupancyPercent: match.occupancyRate,
+          status: (match.status === 'red' ? 'alert' : match.status === 'yellow' ? 'notice' : 'safe') as 'safe' | 'notice' | 'alert',
+        };
+      }
+      return vz;
+    });
+  }, [selectedVenue, liveZones]);
+
+  // Overall live Delhi congestion level if liveZones available
+  const liveDelhiCongestion = React.useMemo(() => {
+    if (!liveZones || liveZones.length === 0) return VENUES_DATA[0].congestionLevel;
+    const avg = Math.round(liveZones.reduce((sum, z) => sum + z.occupancyRate, 0) / liveZones.length);
+    return avg;
+  }, [liveZones]);
 
   const handleResetToIndia = () => {
     setZoom(5);
@@ -262,7 +295,7 @@ export function IndiaMap({ variant = 'attendee', onSelectZone, className }: Indi
                 <div className="px-2.5 py-1 rounded-full bg-surface-container-lowest border border-primary-container text-primary font-bold text-xs shadow-md group-hover:scale-105 transition-transform flex items-center gap-1">
                   <span className="h-2 w-2 rounded-full bg-primary-container animate-ping" />
                   <span>Delhi: Bharat Mandapam</span>
-                  <span className="text-[10px] opacity-75">({VENUES_DATA[0].congestionLevel}%)</span>
+                  <span className="text-[10px] opacity-75">({liveDelhiCongestion}%)</span>
                 </div>
                 <div className="w-2 h-2 rotate-45 -mt-1 bg-surface-container-lowest border-r border-b border-primary-container" />
               </div>
@@ -319,7 +352,7 @@ export function IndiaMap({ variant = 'attendee', onSelectZone, className }: Indi
             <div className="max-w-3xl mx-auto w-full">
               {/* Detailed Zone Grid Layout */}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {selectedVenue?.zones.map((zone) => {
+                {displayZones.map((zone) => {
                   const isAlert = zone.status === 'alert';
                   const isNotice = zone.status === 'notice';
                   const isSelected = selectedZone?.id === zone.id;

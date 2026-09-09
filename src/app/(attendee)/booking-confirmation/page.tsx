@@ -1,12 +1,49 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Check, QrCode, ArrowRight, Home, Calendar } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { Check, QrCode, ArrowRight, Home, Calendar, Loader2 } from 'lucide-react';
 
 export default function BookingConfirmationPage() {
+  const [latestBooking, setLatestBooking] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadLatestBooking() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data } = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (data) {
+            setLatestBooking(data);
+          }
+        }
+      } catch (err) {
+        console.warn('Booking load warning:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadLatestBooking();
+  }, []);
+
+  const bookingDetails = latestBooking?.details || {};
+  const bookingTitle = bookingDetails.title || 'Supreme Court Express Shuttle Line B';
+  const bookingId = latestBooking?.id
+    ? `#FC-${latestBooking.id.substring(0, 5).toUpperCase()}`
+    : '#FC-94821';
+
   return (
     <div className="min-h-[75vh] flex flex-col justify-center items-center py-10 px-4 max-w-md mx-auto">
       <Card className="w-full text-center p-8 shadow-xl">
@@ -16,26 +53,26 @@ export default function BookingConfirmationPage() {
 
         <h1 className="font-bold text-2xl text-on-surface">Reservation Confirmed!</h1>
         <p className="text-xs text-on-surface-variant mt-1 mb-6">
-          Your alternative booking has been confirmed and attached to your Flowcast digital pass.
+          Your alternative booking has been confirmed in Supabase and attached to your Flowcast digital pass.
         </p>
 
         {/* Receipt Details Card */}
         <div className="p-4 rounded-xl bg-surface-container-low border border-outline-subtle text-left text-xs space-y-2.5 mb-6">
           <div className="flex justify-between">
             <span className="text-on-surface-variant">Confirmation ID:</span>
-            <span className="font-mono font-bold text-on-surface">#FC-94821</span>
+            <span className="font-mono font-bold text-on-surface">{bookingId}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-on-surface-variant">Service Type:</span>
-            <span className="font-bold text-on-surface">Express Shuttle Line B</span>
+            <span className="font-bold text-on-surface">{bookingTitle}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-on-surface-variant">Departure Gate:</span>
-            <span className="font-bold text-on-surface">Gate 4 North Hub</span>
+            <span className="text-on-surface-variant">Status:</span>
+            <span className="font-bold text-secondary capitalize">{latestBooking?.status || 'Confirmed'}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-on-surface-variant">Assigned Time Slot:</span>
-            <span className="font-bold text-secondary">05:15 PM (Priority Lane)</span>
+            <span className="font-bold text-secondary">Immediate FastTrack Priority</span>
           </div>
         </div>
 

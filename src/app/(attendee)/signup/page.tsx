@@ -3,20 +3,142 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StatusPill } from '@/components/ui/status-pill';
-import { ArrowRight, ShieldCheck } from 'lucide-react';
+import { ArrowRight, ShieldCheck, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 
 export default function SignupPage() {
   const router = useRouter();
-  const [fullName, setFullName] = useState('Aarav Sharma');
-  const [email, setEmail] = useState('aarav.sharma@example.com');
-  const [password, setPassword] = useState('flowcast2026');
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ fullName?: string; email?: string; password?: string }>({});
 
-  const handleSignup = (e: React.FormEvent) => {
+  const validate = () => {
+    const errors: { fullName?: string; email?: string; password?: string } = {};
+    const nameTrimmed = fullName.trim();
+    const emailTrimmed = email.trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!nameTrimmed) {
+      errors.fullName = 'Full Name is required';
+    }
+
+    if (!emailTrimmed) {
+      errors.email = 'Email address is required';
+    } else if (!emailRegex.test(emailTrimmed)) {
+      errors.email = 'Please enter a valid email address (e.g. name@domain.com)';
+    }
+
+    if (!password) {
+      errors.password = 'Password is required';
+    } else if (password.length < 6) {
+      errors.password = 'Password must be at least 6 characters';
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    router.push('/onboarding/step-1');
+    setAuthError(null);
+    setSuccessMessage(null);
+
+    // Validation checks BEFORE submitting to Supabase
+    if (!validate()) {
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const supabase = createClient();
+      const cleanEmail = email.trim();
+      const cleanName = fullName.trim();
+
+      // 1. Supabase Auth signUp
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          data: {
+            full_name: cleanName,
+            role: 'attendee',
+          },
+        },
+      });
+
+      if (error) {
+        setAuthError(error.message || 'Unable to complete registration');
+        setLoading(false);
+        return;
+      }
+
+      const user = data.user;
+      if (!user) {
+        setAuthError('Registration completed but user object was not returned.');
+        setLoading(false);
+        return;
+      }
+
+      // 2. Insert matching row into public.users with role='attendee'
+      try {
+        await (supabase.from('users') as any).upsert({
+          id: user.id,
+          email: user.email || cleanEmail,
+          full_name: cleanName,
+          role: 'attendee',
+          updated_at: new Date().toISOString(),
+        });
+      } catch (dbErr) {
+        console.warn('Client upsert to public.users warning:', dbErr);
+      }
+
+      // 3. Trigger backend auto-confirm helper so the attendee can proceed immediately
+      try {
+        await fetch('/api/auth/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            email: cleanEmail,
+            fullName: cleanName,
+          }),
+        });
+      } catch (confirmErr) {
+        console.warn('Auto-confirm helper note:', confirmErr);
+      }
+
+      // 4. If session exists or signin works, redirect to onboarding
+      if (data.session) {
+        router.push('/onboarding/step-1');
+        router.refresh();
+      } else {
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+
+        if (!signInErr && signInData.session) {
+          router.push('/onboarding/step-1');
+          router.refresh();
+        } else {
+          setSuccessMessage('Account created successfully! You can now log in.');
+          setTimeout(() => {
+            router.push('/login');
+          }, 1500);
+        }
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Unexpected error during signup');
+      setLoading(false);
+    }
   };
 
   return (
@@ -38,44 +160,127 @@ export default function SignupPage() {
           </p>
         </div>
 
-        <form className="space-y-4" onSubmit={handleSignup}>
+        {authError && (
+          <div
+            role="alert"
+            className="mb-5 p-3.5 rounded-xl bg-danger-container/15 border border-danger/30 flex items-start gap-2.5 text-xs text-danger-container"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-danger" />
+            <div className="flex-1">
+              <span className="font-semibold block text-on-surface">Registration Error</span>
+              <span className="text-on-surface-variant leading-relaxed">{authError}</span>
+            </div>
+          </div>
+        )}
+
+        {successMessage && (
+          <div
+            role="status"
+            className="mb-5 p-3.5 rounded-xl bg-primary-container/15 border border-primary-container/30 flex items-start gap-2.5 text-xs text-primary-container"
+          >
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-primary-container" />
+            <div className="flex-1">
+              <span className="font-semibold block text-on-surface">Success</span>
+              <span className="text-on-surface-variant leading-relaxed">{successMessage}</span>
+            </div>
+          </div>
+        )}
+
+        <form className="space-y-4" onSubmit={handleSignup} noValidate>
           <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-on-surface">Full Name</label>
+            <label className="block text-xs font-semibold text-on-surface" htmlFor="fullName">
+              Full Name <span className="text-danger">*</span>
+            </label>
             <Input
+              id="fullName"
               type="text"
               value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              onChange={(e) => {
+                setFullName(e.target.value);
+                if (fieldErrors.fullName) {
+                  setFieldErrors((prev) => ({ ...prev, fullName: undefined }));
+                }
+              }}
               placeholder="Aarav Sharma"
-              required
+              className={fieldErrors.fullName ? 'border-danger/60 focus:border-danger focus:ring-danger/20' : ''}
+              disabled={loading}
+              aria-invalid={!!fieldErrors.fullName}
+              aria-describedby={fieldErrors.fullName ? 'name-error' : undefined}
             />
+            {fieldErrors.fullName && (
+              <p id="name-error" className="text-[11px] text-danger font-medium flex items-center gap-1 mt-1">
+                {fieldErrors.fullName}
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-on-surface">Email address</label>
+            <label className="block text-xs font-semibold text-on-surface" htmlFor="signup-email">
+              Email address <span className="text-danger">*</span>
+            </label>
             <Input
+              id="signup-email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (fieldErrors.email) {
+                  setFieldErrors((prev) => ({ ...prev, email: undefined }));
+                }
+              }}
               placeholder="name@domain.com"
-              required
+              className={fieldErrors.email ? 'border-danger/60 focus:border-danger focus:ring-danger/20' : ''}
+              disabled={loading}
+              aria-invalid={!!fieldErrors.email}
+              aria-describedby={fieldErrors.email ? 'signup-email-error' : undefined}
             />
+            {fieldErrors.email && (
+              <p id="signup-email-error" className="text-[11px] text-danger font-medium flex items-center gap-1 mt-1">
+                {fieldErrors.email}
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-on-surface">Create Password</label>
+            <label className="block text-xs font-semibold text-on-surface" htmlFor="signup-password">
+              Create Password <span className="text-danger">*</span>
+            </label>
             <Input
+              id="signup-password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••••••"
-              required
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (fieldErrors.password) {
+                  setFieldErrors((prev) => ({ ...prev, password: undefined }));
+                }
+              }}
+              placeholder="Min. 6 characters"
+              className={fieldErrors.password ? 'border-danger/60 focus:border-danger focus:ring-danger/20' : ''}
+              disabled={loading}
+              aria-invalid={!!fieldErrors.password}
+              aria-describedby={fieldErrors.password ? 'signup-password-error' : undefined}
             />
+            {fieldErrors.password && (
+              <p id="signup-password-error" className="text-[11px] text-danger font-medium flex items-center gap-1 mt-1">
+                {fieldErrors.password}
+              </p>
+            )}
           </div>
 
           <div className="pt-2">
-            <Button type="submit" className="w-full py-3">
-              <span>Continue to Personalization</span>
-              <ArrowRight className="w-4 h-4 ml-1.5" />
+            <Button type="submit" className="w-full py-3" disabled={loading}>
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Creating Account...
+                </span>
+              ) : (
+                <span className="flex items-center justify-center">
+                  Continue to Personalization
+                  <ArrowRight className="w-4 h-4 ml-1.5" />
+                </span>
+              )}
             </Button>
           </div>
         </form>

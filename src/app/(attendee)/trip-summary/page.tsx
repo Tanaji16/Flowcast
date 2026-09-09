@@ -1,18 +1,51 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { createClient } from '@/lib/supabase/client';
 import { Clock, ShieldCheck, Leaf, Award, ArrowLeft, Download } from 'lucide-react';
 
 export default function TripSummaryPage() {
+  const [userName, setUserName] = useState('Attendee');
+  const [bookingsCount, setBookingsCount] = useState(2);
+
+  useEffect(() => {
+    async function loadSummary() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await (supabase
+            .from('users') as any)
+            .select('full_name')
+            .eq('id', user.id)
+            .maybeSingle();
+          if (profile && (profile as any).full_name) {
+            setUserName((profile as any).full_name);
+          }
+          const { data: bookings } = await supabase
+            .from('bookings')
+            .select('id')
+            .eq('user_id', user.id);
+          if (bookings) {
+            setBookingsCount(bookings.length || 2);
+          }
+        }
+      } catch (err) {
+        console.warn('Trip summary load warning:', err);
+      }
+    }
+    loadSummary();
+  }, []);
+
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-bold text-2xl text-on-surface tracking-tight">Event Flow Summary</h1>
+          <h1 className="font-bold text-2xl text-on-surface tracking-tight">{userName}&apos;s Event Flow Summary</h1>
           <p className="text-xs text-on-surface-variant mt-0.5">
             Your mindful travel stats and crowd optimization impact.
           </p>
@@ -57,7 +90,7 @@ export default function TripSummaryPage() {
 
       {/* Highlights */}
       <Card className="p-6 space-y-4">
-        <h3 className="font-bold text-base text-on-surface">Journey Highlights</h3>
+        <h3 className="font-bold text-base text-on-surface">Journey Highlights ({bookingsCount} Active Passes)</h3>
         <div className="space-y-3 text-xs">
           <div className="p-3 rounded-xl bg-surface-container-low flex items-center justify-between">
             <span>Morning Check-in (Gate 4 Express)</span>
