@@ -18,300 +18,411 @@ import {
   AlertTriangle,
   Utensils,
   Shuffle,
-  Loader2,
-  Bell,
+  RefreshCw,
+  Sparkles,
+  Compass,
+  Check,
 } from 'lucide-react';
 
 export default function DashboardPage() {
   const [userName, setUserName] = useState('Aarav');
-  const [zones, setZones] = useState<any[]>([]);
-  const [alerts, setAlerts] = useState<any[]>([]);
-  const [bookings, setBookings] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [hasRerouted, setHasRerouted] = useState(false);
+  const [timeSaved, setTimeSaved] = useState(45);
+  const [selectedZone, setSelectedZone] = useState<string>('Gate 4 North');
+  const [activeTab, setActiveTab] = useState<'all' | 'priority'>('all');
+  const [showPassModal, setShowPassModal] = useState(false);
+
+  // Dynamic live zone list that reacts to rerouting
+  const [zones, setZones] = useState([
+    { id: 'z-gate4', name: 'Gate 4 North FastTrack', type: 'entrance', occ: 92, status: 'critical', wait: 24 },
+    { id: 'z-gate2', name: 'West Concourse Gate 2', type: 'entrance', occ: 38, status: 'safe', wait: 2 },
+    { id: 'z-plenary', name: 'Plenary Summit Hall A', type: 'hall', occ: 84, status: 'warning', wait: 12 },
+    { id: 'z-pavilion', name: 'Pavilion 2 Garden Dining', type: 'dining', occ: 32, status: 'safe', wait: 0 },
+    { id: 'z-metro', name: 'Metro Electric Shuttle Hub', type: 'transit', occ: 45, status: 'safe', wait: 4 },
+  ]);
 
   useEffect(() => {
-    async function loadDashboardData() {
+    async function loadUser() {
       try {
         const supabase = createClient();
-
-        // 1. Get current user
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const metaName = user.user_metadata?.full_name;
-          if (metaName) {
-            setUserName(metaName.split(' ')[0]);
-          }
-          // Query users table for profile name
-          const { data: profile } = await (supabase
-            .from('users') as any)
-            .select('full_name')
-            .eq('id', user.id)
-            .maybeSingle();
-          if (profile && (profile as any).full_name) {
-            setUserName((profile as any).full_name.split(' ')[0]);
-          }
-
-          // 2. Query attendee bookings
-          const { data: bookingData } = await supabase
-            .from('bookings')
-            .select('*')
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false });
-          if (bookingData && bookingData.length > 0) {
-            setBookings(bookingData);
-          }
-        }
-
-        // 3. Query zones table for live occupancy & status
-        const { data: zonesData } = await supabase
-          .from('zones')
-          .select('*')
-          .order('occupancy_percent', { ascending: false });
-        if (zonesData && zonesData.length > 0) {
-          setZones(zonesData);
-        }
-
-        // 4. Query active alerts
-        const { data: alertsData } = await supabase
-          .from('alerts')
-          .select('*')
-          .eq('resolved', false)
-          .order('created_at', { ascending: false })
-          .limit(3);
-        if (alertsData && alertsData.length > 0) {
-          setAlerts(alertsData);
+          if (metaName) setUserName(metaName.split(' ')[0]);
         }
       } catch (err) {
-        console.warn('Dashboard Supabase fetch error:', err);
-      } finally {
-        setLoading(false);
+        console.warn('User load note:', err);
       }
     }
-
-    loadDashboardData();
+    loadUser();
   }, []);
 
-  const criticalCount = zones.filter((z) => z.occupancy_percent >= 85 || z.status === 'red' || z.status === 'critical').length;
-  const currentZone = zones.find((z) => z.name?.includes('Plenary')) || zones[0] || {
-    name: 'Plenary Hall A',
-    occupancy_percent: 78,
-    status: 'amber',
+  // Handler: When attendee clicks "Accept Reroute"
+  const handleAcceptReroute = () => {
+    setHasRerouted(true);
+    setTimeSaved(65); // Increases time saved by 20 mins!
+    // Dynamically update the zones state (demonstrating crowd redistribution)
+    setZones((prev) =>
+      prev.map((z) => {
+        if (z.id === 'z-gate4') return { ...z, occ: 68, status: 'warning', wait: 10 };
+        if (z.id === 'z-gate2') return { ...z, occ: 52, status: 'safe', wait: 4 };
+        return z;
+      })
+    );
+  };
+
+  // Handler: Reset simulation
+  const handleResetSimulation = () => {
+    setHasRerouted(false);
+    setTimeSaved(45);
+    setZones([
+      { id: 'z-gate4', name: 'Gate 4 North FastTrack', type: 'entrance', occ: 92, status: 'critical', wait: 24 },
+      { id: 'z-gate2', name: 'West Concourse Gate 2', type: 'entrance', occ: 38, status: 'safe', wait: 2 },
+      { id: 'z-plenary', name: 'Plenary Summit Hall A', type: 'hall', occ: 84, status: 'warning', wait: 12 },
+      { id: 'z-pavilion', name: 'Pavilion 2 Garden Dining', type: 'dining', occ: 32, status: 'safe', wait: 0 },
+      { id: 'z-metro', name: 'Metro Electric Shuttle Hub', type: 'transit', occ: 45, status: 'safe', wait: 4 },
+    ]);
   };
 
   return (
     <div className="space-y-6">
-      {/* Reassuring Guardian Monitoring Banner */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-surface-container-lowest border border-outline-subtle shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Dynamic Header & Greeting */}
+      <div className="p-5 rounded-2xl bg-surface-container-lowest border border-outline-subtle shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center text-secondary shrink-0">
-            <ShieldCheck className="w-5 h-5" />
+          <div className="w-11 h-11 rounded-2xl bg-primary-container text-white font-extrabold text-xl flex items-center justify-center shadow-md shadow-primary-container/25 shrink-0">
+            {userName[0].toUpperCase()}
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h4 className="font-bold text-sm sm:text-base text-on-surface">
-                Welcome, {userName}! Autonomous Guardian Sentinel
-              </h4>
-              <Badge variant="teal">Active</Badge>
+              <h1 className="font-bold text-lg sm:text-xl text-on-surface">
+                Hi, {userName}! Event Companion Hub
+              </h1>
+              <Badge variant="teal">AI Flow Active</Badge>
             </div>
             <p className="text-xs text-on-surface-variant mt-0.5">
-              Live crowd telemetry active for Bharat Mandapam & Pragati Maidan complex.
+              Live crowd telemetry: Bharat Mandapam • Pragati Maidan complex
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-center">
-          <StatusPill status="safe" label="SafeHaven Sync: 99.4% On Track" />
+
+        {/* Dynamic Reset / Simulation Toggle */}
+        <div className="flex items-center gap-2">
+          {hasRerouted ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleResetSimulation}
+              className="text-xs cursor-pointer flex items-center gap-1.5"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-secondary" />
+              <span>Reset Reroute Demo</span>
+            </Button>
+          ) : (
+            <StatusPill status="safe" label="SafeHaven Sync: 99.4% On Track" />
+          )}
         </div>
       </div>
-
-      {/* Active Alerts Banner if any exist from Supabase */}
-      {alerts.length > 0 && (
-        <div className="p-4 rounded-2xl bg-danger-container/10 border border-danger/30 space-y-2">
-          <div className="flex items-center gap-2 text-danger text-xs font-bold uppercase tracking-wider">
-            <Bell className="w-4 h-4" />
-            <span>Active Live Crowd Advisories ({alerts.length})</span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-            {alerts.map((al) => (
-              <div key={al.id} className="p-3 rounded-xl bg-surface-container-lowest border border-outline-subtle text-xs">
-                <span className="font-bold text-on-surface block">{al.title}</span>
-                <p className="text-on-surface-variant mt-0.5 text-[11px]">{al.message}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* KPI Highlight Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <Card className="p-4">
-          <span className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Time Saved</span>
-          <div className="text-2xl sm:text-3xl font-extrabold text-primary-container mt-1">45m</div>
-          <span className="text-[10px] text-secondary font-semibold">via smart routing</span>
-        </Card>
-        <Card className="p-4">
-          <span className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Active Bookings</span>
-          <div className="text-2xl sm:text-3xl font-extrabold text-secondary mt-1">
-            {bookings.length > 0 ? `${bookings.length} Passes` : '2 Active'}
+        <Card className="p-4 bg-surface-container-lowest transition-all">
+          <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+            Time Saved
+          </span>
+          <div className="text-2xl sm:text-3xl font-extrabold text-primary-container mt-1 flex items-baseline gap-1">
+            {timeSaved}m
+            {hasRerouted && (
+              <span className="text-xs font-bold text-secondary animate-bounce">+20m</span>
+            )}
           </div>
-          <span className="text-[10px] text-on-surface-variant">Gate 4 & Hall A</span>
-        </Card>
-        <Card className="p-4">
-          <span className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Current Zone Status</span>
-          <div className="text-2xl sm:text-3xl font-extrabold text-tertiary-dark mt-1">
-            {currentZone.occupancy_percent >= 80 ? 'High' : currentZone.occupancy_percent >= 50 ? 'Moderate' : 'Comfortable'}
-          </div>
-          <span className="text-[10px] text-tertiary-dark font-semibold">
-            {currentZone.name} ({currentZone.occupancy_percent}%)
+          <span className="text-[10px] text-secondary font-semibold">
+            {hasRerouted ? 'Active Reroute Applied' : 'via smart routing'}
           </span>
         </Card>
-        <Card className="p-4">
-          <span className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Next Session</span>
-          <div className="text-2xl sm:text-3xl font-extrabold text-on-surface mt-1">01:15 PM</div>
-          <span className="text-[10px] text-on-surface-variant">in 1h 25m</span>
+
+        <Card className="p-4 bg-surface-container-lowest">
+          <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+            FastTrack Pass
+          </span>
+          <div className="text-2xl sm:text-3xl font-extrabold text-secondary mt-1">
+            {hasRerouted ? 'Gate 2 Priority' : 'Gate 4 Standard'}
+          </div>
+          <span className="text-[10px] text-on-surface-variant">Pass #FC-94821</span>
+        </Card>
+
+        <Card className="p-4 bg-surface-container-lowest">
+          <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+            Queue Congestion
+          </span>
+          <div className="text-2xl sm:text-3xl font-extrabold mt-1">
+            <span className={hasRerouted ? 'text-secondary' : 'text-primary-container'}>
+              {hasRerouted ? '2 mins (Low)' : '24 mins (High)'}
+            </span>
+          </div>
+          <span className="text-[10px] text-on-surface-variant">
+            {hasRerouted ? 'West Concourse Bypass' : 'North Gate 4 Bottleneck'}
+          </span>
+        </Card>
+
+        <Card className="p-4 bg-surface-container-lowest">
+          <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+            Next Session
+          </span>
+          <div className="text-2xl sm:text-3xl font-extrabold text-on-surface mt-1">10:30 AM</div>
+          <span className="text-[10px] text-on-surface-variant">Plenary Hall A (Row F)</span>
         </Card>
       </div>
 
-      {/* Two Column Workspace: 65% Timeline / 35% Smart Nudges & Quick Map */}
+      {/* THE MAGIC MOMENT: DYNAMIC AUTONOMOUS NUDGE BANNER */}
+      <div
+        className={`p-5 sm:p-6 rounded-2xl border transition-all duration-300 shadow-md ${
+          hasRerouted
+            ? 'bg-secondary/10 border-secondary/40'
+            : 'bg-primary-container/10 border-primary-container/40 ring-2 ring-primary-container/20'
+        }`}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+                hasRerouted ? 'bg-secondary text-white' : 'bg-primary-container text-white animate-pulse'
+              }`}
+            >
+              {hasRerouted ? <Check className="w-6 h-6 stroke-[3]" /> : <AlertTriangle className="w-6 h-6" />}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-xs font-bold uppercase tracking-wider ${
+                    hasRerouted ? 'text-secondary' : 'text-primary-container'
+                  }`}
+                >
+                  {hasRerouted ? 'Reroute Accepted & Confirmed' : 'Flowcast Autonomous Nudge'}
+                </span>
+                <Badge variant={hasRerouted ? 'teal' : 'coral'}>
+                  {hasRerouted ? 'Safe Transit' : 'Bottleneck Detected'}
+                </Badge>
+              </div>
+
+              <h3 className="font-bold text-base sm:text-lg text-on-surface">
+                {hasRerouted
+                  ? 'Active Reroute: West Concourse Gate 2 FastTrack Assigned'
+                  : 'Gate 4 North Overcrowded (+24m queue) — Divert to Gate 2'}
+              </h3>
+
+              <p className="text-xs text-on-surface-variant leading-relaxed max-w-2xl">
+                {hasRerouted
+                  ? 'Your pass has been upgraded to West Concourse Gate 2 with instant turnstile priority. You bypassed 20 minutes of congestion!'
+                  : 'Turnstile sensors report 92% density at Gate 4. Diverting 500m to West Concourse Gate 2 gets you in within 2 minutes and saves 20 minutes!'}
+              </p>
+            </div>
+          </div>
+
+          <div className="shrink-0 pt-2 sm:pt-0">
+            {hasRerouted ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => setShowPassModal(true)}
+                  className="bg-secondary hover:bg-secondary/90 text-white cursor-pointer"
+                >
+                  <QrCode className="w-4 h-4 mr-1.5" />
+                  <span>Show Gate 2 Pass</span>
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="lg"
+                onClick={handleAcceptReroute}
+                className="w-full sm:w-auto shadow-lg shadow-primary-container/30 cursor-pointer text-xs sm:text-sm py-3 px-5 font-bold"
+              >
+                <span>Accept Reroute & Save 20m</span>
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Two Column Grid: Dynamic Itinerary & Live Zone Telemetry */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Today's Schedule Timeline */}
-        <div className="lg:col-span-8 space-y-4">
+        {/* Left: Dynamic Itinerary */}
+        <div className="lg:col-span-7 space-y-4">
           <div className="bg-surface-container-lowest rounded-2xl border border-outline-subtle p-5 sm:p-6 shadow-sm">
-            <div className="flex items-center justify-between pb-4 mb-6 border-b border-surface-container-high">
+            <div className="flex items-center justify-between pb-3 mb-5 border-b border-surface-container-high">
               <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="font-bold text-lg text-on-surface">Today&apos;s Itinerary</h2>
-                  <span className="text-xs text-on-surface-variant">• Thursday, Oct 24</span>
-                </div>
-                <p className="text-xs text-on-surface-variant mt-0.5">Pragati Maidan Central Campus & Innovation Loop</p>
+                <h2 className="font-bold text-base sm:text-lg text-on-surface">
+                  Today&apos;s Live Flow Schedule
+                </h2>
+                <p className="text-xs text-on-surface-variant mt-0.5">
+                  Dynamically adapts when you accept reroutes and off-peak suggestions
+                </p>
               </div>
               <Link href="/itinerary">
-                <Button variant="ghost" size="sm">View Full Schedule →</Button>
+                <Button variant="ghost" size="sm" className="text-xs text-secondary">
+                  Full Schedule →
+                </Button>
               </Link>
             </div>
 
-            {/* Continuous Timeline */}
-            <div className="relative pl-4 space-y-6">
-              <div className="absolute left-[23px] top-4 bottom-4 w-[2px] bg-surface-container-high" />
-
-              {/* Item 1: Completed */}
-              <div className="relative flex items-start gap-4">
-                <div className="relative z-10 w-8 h-8 rounded-full bg-secondary text-white flex items-center justify-center shrink-0 shadow-sm">
-                  <CheckCircle2 className="w-4 h-4" />
+            {/* Dynamic Items */}
+            <div className="space-y-4">
+              {/* Event 1: Morning Gate */}
+              <div
+                className={`p-4 rounded-xl border transition-all ${
+                  hasRerouted
+                    ? 'bg-secondary/10 border-secondary/30'
+                    : 'bg-surface-container-low border-outline-subtle'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="font-bold text-on-surface flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-secondary" />
+                    09:30 AM - 10:00 AM
+                  </span>
+                  <Badge variant={hasRerouted ? 'teal' : 'coral'}>
+                    {hasRerouted ? 'Rerouted (FastTrack)' : 'Congested Queue'}
+                  </Badge>
                 </div>
-                <div className="flex-1 bg-surface-container-low/60 rounded-xl p-4 border border-outline-subtle">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-on-surface">09:30 AM</span>
-                    <Badge variant="teal">Completed</Badge>
-                  </div>
-                  <h4 className="font-bold text-sm text-on-surface">Gate 4 Check-in & RFID Badge Collection</h4>
-                  <p className="text-xs text-on-surface-variant mt-0.5">North Entrance Gate • Express Lane 2</p>
-                </div>
+                <h4 className="font-bold text-sm text-on-surface">
+                  {hasRerouted
+                    ? 'West Concourse Gate 2 Expedited Entry'
+                    : 'Gate 4 North Entrance & RFID Badge Collection'}
+                </h4>
+                <p className="text-xs text-on-surface-variant mt-0.5">
+                  {hasRerouted
+                    ? 'Assigned Lane 1 • Estimated wait: ~2 mins'
+                    : 'North Gate • Heavy queue: ~24 mins wait time'}
+                </p>
               </div>
 
-              {/* Item 2: Up Next */}
-              <div className="relative flex items-start gap-4">
-                <div className="relative z-10 w-8 h-8 rounded-full bg-primary-container text-white flex items-center justify-center shrink-0 shadow-md shadow-primary-container/30 ring-4 ring-primary-container/20">
-                  <Zap className="w-4 h-4" />
+              {/* Event 2: Keynote */}
+              <div className="p-4 rounded-xl bg-white border border-primary-container/40 shadow-xs">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="font-bold text-primary-container flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5" />
+                    UP NEXT • 10:30 AM - 12:00 PM
+                  </span>
+                  <Badge variant="coral">84% Full</Badge>
                 </div>
-                <div className="flex-1 bg-white rounded-xl p-4 border border-primary-container/30 shadow-xs">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-primary-container">UP NEXT • 10:30 AM - 12:00 PM</span>
-                    <Badge variant="coral">Moderate Density</Badge>
-                  </div>
-                  <h4 className="font-bold text-sm text-on-surface">Keynote: Spatial AI in Mega-Event Crowd Logistics</h4>
-                  <p className="text-xs text-on-surface-variant mt-0.5 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-outline" />
-                    Plenary Hall A • Seat Reserved (Row F, 22)
-                  </p>
-
-                  <div className="mt-4 pt-3 border-t border-surface-container-high flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <QrCode className="w-4 h-4 text-secondary" />
-                      <span className="text-xs font-mono font-bold text-on-surface">PASS-94821</span>
-                    </div>
-                    <Link href="/alternatives">
-                      <Button size="sm" variant="secondary" className="text-xs">
-                        <Shuffle className="w-3.5 h-3.5 mr-1" />
-                        <span>Explore Less Crowded Route</span>
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
+                <h4 className="font-bold text-sm text-on-surface">
+                  Keynote: AI Spatial Coordination in Mega-Events
+                </h4>
+                <p className="text-xs text-on-surface-variant mt-0.5 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-outline" />
+                  Plenary Hall A • Seat Reserved (Row F, 22)
+                </p>
               </div>
 
-              {/* Item 3: Lunch */}
-              <div className="relative flex items-start gap-4">
-                <div className="relative z-10 w-8 h-8 rounded-full bg-surface-container-high text-outline flex items-center justify-center shrink-0">
-                  <Utensils className="w-4 h-4" />
+              {/* Event 3: Lunch */}
+              <div className="p-4 rounded-xl bg-surface-container-low border border-outline-subtle">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="font-semibold text-on-surface-variant">12:30 PM</span>
+                  <Badge variant="teal">0m Queue Wait</Badge>
                 </div>
-                <div className="flex-1 bg-surface-container-lowest rounded-xl p-4 border border-outline-subtle">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-on-surface-variant">12:30 PM</span>
-                    <Badge variant="neutral">Upcoming</Badge>
-                  </div>
-                  <h4 className="font-bold text-sm text-on-surface">Networking Lunch Break</h4>
-                  <p className="text-xs text-on-surface-variant mt-0.5">Central Dining Courtyard (Nudge: Pavilion 2 has zero queues)</p>
-                </div>
+                <h4 className="font-bold text-sm text-on-surface">
+                  Recommended Lunch: Pavilion 2 Garden Dining
+                </h4>
+                <p className="text-xs text-on-surface-variant mt-0.5">
+                  AI reroute recommends bypassing the packed Central Food Court
+                </p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Nudge Advisory & Quick Actions */}
-        <div className="lg:col-span-4 space-y-4">
-          {/* Smart Nudge Card */}
-          <div className="p-5 rounded-2xl bg-tertiary-fixed/40 border border-tertiary-dark/20 space-y-3">
-            <div className="flex items-center gap-2 text-tertiary-dark font-bold text-xs uppercase tracking-wider">
-              <AlertTriangle className="w-4 h-4 text-tertiary-dark shrink-0" />
-              <span>Flowcast Nudge Engine</span>
-            </div>
-            <h3 className="font-bold text-sm text-on-surface">
-              Gate 4 Crowd Spike Warning (+24 min wait)
-            </h3>
-            <p className="text-xs text-on-surface-variant leading-relaxed">
-              Real-time turnstile telemetry detected a 35% surge at North Gate 4. Divert through West Concourse Gate 2 for immediate expedited clearance.
-            </p>
-            <div className="pt-1">
-              <Link href="/alternatives">
-                <Button size="sm" className="w-full text-xs">
-                  <span>Accept Reroute & Save 20m</span>
-                  <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
-                </Button>
-              </Link>
-            </div>
-          </div>
-
-          {/* Live Zone Telemetry Card */}
-          <Card className="p-5 space-y-3">
+        {/* Right: Interactive Zone Density Telemetry */}
+        <div className="lg:col-span-5 space-y-4">
+          <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h4 className="font-bold text-sm text-on-surface">Live Zone Density</h4>
-              <Link href="/map" className="text-xs text-secondary font-semibold hover:underline">
-                Full Map →
+              <div>
+                <h3 className="font-bold text-base text-on-surface">Live Zone Density</h3>
+                <p className="text-xs text-on-surface-variant">Click any zone to inspect & route</p>
+              </div>
+              <Link href="/map" className="text-xs text-secondary font-bold hover:underline">
+                Open Map →
               </Link>
             </div>
+
             <div className="space-y-2.5">
-              {(zones.length > 0 ? zones.slice(0, 4) : [
-                { name: 'Gate 4 North FastTrack', occupancy_percent: 92, status: 'red' },
-                { name: 'Plenary Summit Hall A', occupancy_percent: 86, status: 'amber' },
-                { name: 'Innovation Expo Pavilion 2', occupancy_percent: 42, status: 'green' },
-                { name: 'Central Food Court', occupancy_percent: 68, status: 'amber' },
-              ]).map((z: any) => (
-                <div key={z.name || z.id} className="p-2.5 rounded-xl bg-surface-container-low flex items-center justify-between text-xs">
-                  <div>
-                    <span className="font-semibold text-on-surface block">{z.name}</span>
-                    <span className="text-[10px] text-on-surface-variant">
-                      {z.occupancy_percent >= 80 ? 'Heavy Density' : z.occupancy_percent >= 50 ? 'Moderate' : 'Low Queue'}
+              {zones.map((z) => (
+                <div
+                  key={z.id}
+                  onClick={() => setSelectedZone(z.name)}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                    selectedZone === z.name
+                      ? 'bg-secondary/10 border-secondary ring-1 ring-secondary'
+                      : 'bg-surface-container-low border-outline-subtle hover:bg-surface-container'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-on-surface">{z.name}</span>
+                    <Badge variant={z.status === 'critical' ? 'coral' : z.status === 'warning' ? 'amber' : 'teal'}>
+                      {z.occ}% Full
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px] text-on-surface-variant mt-1.5">
+                    <span>Wait time: ~{z.wait} mins</span>
+                    <span className="text-secondary font-semibold">
+                      {z.occ > 80 ? 'Heavy Density' : 'Smooth Flow'}
                     </span>
                   </div>
-                  <Badge variant={z.occupancy_percent >= 85 ? 'coral' : z.occupancy_percent >= 60 ? 'amber' : 'teal'}>
-                    {z.occupancy_percent}%
-                  </Badge>
+                  <div className="w-full h-1.5 rounded-full bg-surface-container-high mt-2 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        z.occ > 80 ? 'bg-primary-container' : z.occ > 50 ? 'bg-tertiary-dark' : 'bg-secondary'
+                      }`}
+                      style={{ width: `${z.occ}%` }}
+                    />
+                  </div>
                 </div>
               ))}
+            </div>
+
+            {/* Selected Zone Quick Advice */}
+            <div className="p-3.5 rounded-xl bg-surface-container-lowest border border-outline-subtle text-xs space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">
+                Selected Zone Telemetry
+              </span>
+              <p className="font-bold text-on-surface">{selectedZone}</p>
+              <p className="text-on-surface-variant text-[11px]">
+                {selectedZone.includes('Gate 4')
+                  ? 'Heavy surge detected. Divert to Gate 2 for immediate entry.'
+                  : 'Operating at optimal transit speed. Green safety clearance.'}
+              </p>
             </div>
           </Card>
         </div>
       </div>
+
+      {/* QR Pass Modal */}
+      {showPassModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded-2xl p-6 max-w-sm w-full border border-outline-subtle shadow-2xl text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-secondary/15 text-secondary flex items-center justify-center mx-auto">
+              <QrCode className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-on-surface">West Concourse Gate 2 Pass</h3>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                FastTrack QR Code • Valid for immediate entrance
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-white border border-outline-subtle inline-block shadow-sm">
+              <QrCode className="w-36 h-36 text-charcoal mx-auto" />
+              <span className="font-mono text-xs font-bold text-secondary block mt-2">
+                FC-GATE2-EXPRESS
+              </span>
+            </div>
+
+            <Button className="w-full" onClick={() => setShowPassModal(false)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

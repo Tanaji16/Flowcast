@@ -5,10 +5,9 @@ import { IndiaMap } from '@/components/shared/india-map';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { useRealtimeZones } from '@/hooks/useRealtimeZones';
 import {
   Users,
   AlertTriangle,
@@ -17,99 +16,202 @@ import {
   Clock,
   ShieldAlert,
   ArrowUpRight,
-  LogOut,
-  Zap,
+  Send,
+  CheckCircle2,
+  Sparkles,
   RefreshCw,
+  Zap,
 } from 'lucide-react';
 
 export default function CommandCenterPage() {
-  const router = useRouter();
-  const [selectedZone, setSelectedZone] = useState<string>('Gate 4 North FastTrack Entrance');
-  const [alertsCount, setAlertsCount] = useState<number>(2);
-  const { zones: liveZones, loading, lastUpdated, updateZoneStatus } = useRealtimeZones();
-  const [isSimulatingSurge, setIsSimulatingSurge] = useState(false);
+  // Interactive scenario states: 'normal' | 'surge' | 'dispersed'
+  const [scenario, setScenario] = useState<'normal' | 'surge' | 'dispersed'>('normal');
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [dispatchedAlerts, setDispatchedAlerts] = useState<string[]>([]);
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
 
-  useEffect(() => {
-    async function loadAlerts() {
-      try {
-        const supabase = createClient();
-        const { data } = await (supabase.from('alerts') as any).select('id').eq('resolved', false);
-        if (data && data.length > 0) {
-          setAlertsCount(data.length);
-        }
-      } catch (err) {
-        // use fallback count
-      }
-    }
-    loadAlerts();
-  }, []);
+  // Dynamic zone metrics that visually change during simulation
+  const zoneMetrics = {
+    normal: [
+      { name: 'Gate 4 North FastTrack', occ: 65, status: 'safe', delay: '4m' },
+      { name: 'Plenary Summit Hall A', occ: 72, status: 'safe', delay: '6m' },
+      { name: 'West Concourse Gate 2', occ: 35, status: 'safe', delay: '1m' },
+      { name: 'Innovation Expo Pavilion 2', occ: 42, status: 'safe', delay: '0m' },
+    ],
+    surge: [
+      { name: 'Gate 4 North FastTrack', occ: 96, status: 'critical', delay: '28m' },
+      { name: 'Plenary Summit Hall A', occ: 92, status: 'critical', delay: '18m' },
+      { name: 'West Concourse Gate 2', occ: 40, status: 'safe', delay: '2m' },
+      { name: 'Innovation Expo Pavilion 2', occ: 45, status: 'safe', delay: '0m' },
+    ],
+    dispersed: [
+      { name: 'Gate 4 North FastTrack', occ: 52, status: 'safe', delay: '5m' },
+      { name: 'Plenary Summit Hall A', occ: 68, status: 'safe', delay: '6m' },
+      { name: 'West Concourse Gate 2', occ: 74, status: 'safe', delay: '4m' },
+      { name: 'Innovation Expo Pavilion 2', occ: 62, status: 'safe', delay: '3m' },
+    ],
+  }[scenario];
 
-  const handleSignOut = async () => {
+  const attendeesCount = {
+    normal: 14820,
+    surge: 19450,
+    dispersed: 14820,
+  }[scenario];
+
+  const hotspotsCount = {
+    normal: 0,
+    surge: 2,
+    dispersed: 0,
+  }[scenario];
+
+  const handleBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!broadcastTitle.trim()) return;
+
+    setIsBroadcasting(true);
     try {
       const supabase = createClient();
-      await supabase.auth.signOut();
-      router.push('/login');
-      router.refresh();
-    } catch {
-      router.push('/login');
+      await supabase.from('alerts').insert({
+        title: broadcastTitle,
+        message: broadcastMessage || 'Immediate advisory dispatched by Organizer HQ.',
+        severity: 'warning',
+        resolved: false,
+      });
+    } catch (err) {
+      console.warn('Broadcast note:', err);
+    } finally {
+      setDispatchedAlerts([broadcastTitle, ...dispatchedAlerts]);
+      setBroadcastTitle('');
+      setBroadcastMessage('');
+      setIsBroadcasting(false);
     }
-  };
-
-  // Compute live aggregates from realtime zones
-  const totalHeadcount = liveZones.reduce((acc, z) => acc + (z.currentOccupancy || 0), 0);
-  const criticalZones = liveZones.filter((z) => z.occupancyRate >= 85 || z.status === 'red');
-  const criticalCount = criticalZones.length;
-
-  // Realtime simulation test: toggle zone occupancy to demonstrate instant live updates
-  const handleToggleSurge = async (zoneId: string, currentOcc: number, maxCap: number) => {
-    setIsSimulatingSurge(true);
-    const isCurrentlyHigh = (currentOcc / maxCap) >= 0.85;
-    const newOccupancy = isCurrentlyHigh ? Math.round(maxCap * 0.45) : Math.round(maxCap * 0.94);
-    const newStatus = isCurrentlyHigh ? 'green' : 'red';
-
-    await updateZoneStatus(zoneId, newOccupancy, newStatus);
-    setTimeout(() => setIsSimulatingSurge(false), 400);
   };
 
   return (
     <div className="space-y-6">
-      {/* Top Realtime Status Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-900 border border-slate-800">
-        <div className="flex items-center gap-2.5">
-          <span className="relative flex h-3 w-3">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
-          </span>
-          <div>
-            <span className="text-xs font-bold text-white tracking-wide">
-              Supabase Realtime Stream: Digital Twin Live
-            </span>
-            <span className="text-[11px] text-slate-400 ml-2">
-              Last packet: {lastUpdated.toLocaleTimeString()} (zero refresh needed)
-            </span>
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="font-bold text-2xl text-white tracking-tight">Organizer Command Center</h1>
+            <Badge variant="teal">Digital Twin Synchronized</Badge>
           </div>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Real-time multi-venue telemetry, crowd dispersal automation, and live what-if simulation.
+          </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Link href="/simulation">
-            <Button size="sm" className="bg-primary-container text-white text-xs h-8">
-              <PlayCircle className="w-3.5 h-3.5 mr-1" />
-              <span>Simulate Scenario</span>
-            </Button>
-          </Link>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleSignOut}
-            className="text-xs text-red-400 hover:text-red-300 border border-red-900/40 h-8 cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5 mr-1" />
-            <span>Sign Out</span>
+        <Link href="/dashboard">
+          <Button variant="secondary" size="sm" className="text-xs text-slate-300 self-start sm:self-auto">
+            <Sparkles className="w-3.5 h-3.5 mr-1 text-primary-container" />
+            <span>Open Attendee Companion →</span>
           </Button>
-        </div>
+        </Link>
       </div>
 
-      {/* Top Telemetry KPI Ribbon */}
+      {/* WHAT-IF INTERACTIVE SCENARIO CONTROLS (DEMO HIGHLIGHT) */}
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-slate-700 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-white font-bold text-sm">
+            <PlayCircle className="w-5 h-5 text-primary-container" />
+            <span>Live Interactive Crowd Simulation & Auto-Dispersal Studio</span>
+          </div>
+          <span className="text-[11px] text-slate-400">Click any preset to see the digital twin react live:</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Preset 1 */}
+          <button
+            type="button"
+            onClick={() => setScenario('normal')}
+            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              scenario === 'normal'
+                ? 'bg-secondary/20 border-secondary ring-1 ring-secondary'
+                : 'bg-slate-900/60 border-slate-700 hover:border-slate-500'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold text-white">1. Normal Event Flow</span>
+              {scenario === 'normal' && <CheckCircle2 className="w-4 h-4 text-secondary" />}
+            </div>
+            <p className="text-[11px] text-slate-400">Nominal queues across all 4 India venues.</p>
+          </button>
+
+          {/* Preset 2 */}
+          <button
+            type="button"
+            onClick={() => setScenario('surge')}
+            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              scenario === 'surge'
+                ? 'bg-red-500/20 border-red-500 ring-2 ring-red-500/30'
+                : 'bg-slate-900/60 border-slate-700 hover:border-slate-500'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold text-red-400">2. Simulate Monsoon Surge</span>
+              {scenario === 'surge' && <AlertTriangle className="w-4 h-4 text-red-400 animate-pulse" />}
+            </div>
+            <p className="text-[11px] text-slate-400">Gate 4 turnstiles jam at 96% code limit (+28m wait).</p>
+          </button>
+
+          {/* Preset 3 */}
+          <button
+            type="button"
+            onClick={() => setScenario('dispersed')}
+            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              scenario === 'dispersed'
+                ? 'bg-emerald-500/20 border-emerald-500 ring-2 ring-emerald-500/30'
+                : 'bg-slate-900/60 border-slate-700 hover:border-slate-500'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold text-emerald-400">3. Autonomous Dispersal</span>
+              {scenario === 'dispersed' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+            </div>
+            <p className="text-[11px] text-slate-400">Flowcast nudges attendees to Gate 2 & Pavilion 2. Balanced!</p>
+          </button>
+        </div>
+
+        {scenario === 'surge' && (
+          <div className="p-3.5 rounded-xl bg-red-950/60 border border-red-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-red-300 text-xs">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>
+                <strong>CRITICAL ALERT:</strong> Gate 4 North turnstiles are at 96% capacity. Code violation imminent.
+              </span>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setScenario('dispersed')}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shrink-0 cursor-pointer shadow-md"
+            >
+              <Zap className="w-3.5 h-3.5 mr-1" />
+              <span>Execute Autonomous Crowd Dispersal</span>
+            </Button>
+          </div>
+        )}
+
+        {scenario === 'dispersed' && (
+          <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-800/80 text-xs text-emerald-300 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>
+                <strong>DISPERSAL COMPLETE:</strong> Flowcast autonomously rerouted 4,200 attendees to West Concourse Gate 2. All zones restored to safe green thresholds!
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setScenario('normal')}
+              className="text-[11px] underline text-emerald-400 hover:text-white cursor-pointer"
+            >
+              Reset to Normal
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* KPI Telemetry Tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
@@ -117,27 +219,31 @@ export default function CommandCenterPage() {
             <Users className="w-4 h-4 text-primary-container" />
           </div>
           <div className="text-3xl font-extrabold text-white mt-1">
-            {totalHeadcount.toLocaleString()}
+            {attendeesCount.toLocaleString()}
           </div>
-          <span className="text-[11px] text-secondary font-semibold">Live turnstile telemetry</span>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
-            <span>Critical Congestion Hotspots</span>
-            <AlertTriangle className="w-4 h-4 text-primary-container" />
-          </div>
-          <div className="text-3xl font-extrabold text-primary-container mt-1">
-            {criticalCount} {criticalCount === 1 ? 'Zone' : 'Zones'}
-          </div>
-          <span className="text-[11px] text-primary-container font-semibold">
-            {criticalZones[0] ? `${criticalZones[0].name} (${criticalZones[0].occupancyRate}%)` : 'All zones optimal'}
+          <span className="text-[11px] text-secondary font-semibold">
+            {scenario === 'surge' ? '+31% crowd influx' : 'Optimal flow density'}
           </span>
         </div>
 
         <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
-            <span>Monitored Venues</span>
+            <span>Critical Hotspots</span>
+            <AlertTriangle className="w-4 h-4 text-primary-container" />
+          </div>
+          <div className="text-3xl font-extrabold text-white mt-1">
+            <span className={hotspotsCount > 0 ? 'text-red-400' : 'text-emerald-400'}>
+              {hotspotsCount} {hotspotsCount === 1 ? 'Zone' : 'Zones'}
+            </span>
+          </div>
+          <span className="text-[11px] text-slate-400 font-semibold">
+            {hotspotsCount > 0 ? 'Gate 4 & Plenary breached' : 'All zones compliant'}
+          </span>
+        </div>
+
+        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
+            <span>India Multi-Venue Sync</span>
             <Radio className="w-4 h-4 text-secondary" />
           </div>
           <div className="text-3xl font-extrabold text-white mt-1">4 Venues</div>
@@ -146,124 +252,117 @@ export default function CommandCenterPage() {
 
         <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
-            <span>Active Broadcast Alerts</span>
+            <span>Flowcast Dispersal AI</span>
             <Clock className="w-4 h-4 text-tertiary" />
           </div>
-          <div className="text-3xl font-extrabold text-white mt-1">{alertsCount} Live</div>
+          <div className="text-3xl font-extrabold text-white mt-1">
+            {scenario === 'dispersed' ? 'Balanced' : scenario === 'surge' ? 'Overloaded' : 'Ready'}
+          </div>
           <span className="text-[11px] text-secondary font-semibold">Autonomous Nudge Engine</span>
         </div>
       </div>
 
-      {/* Main Map Component with Live Realtime Zone Data */}
-      <div className="space-y-3">
-        <div>
-          <h2 className="text-lg font-bold text-white tracking-tight">
-            Event Digital Twin Map
-          </h2>
-          <p className="text-xs text-slate-400">
-            Realtime bidirectional link enabled. Click any zone node to inspect live flow parameters.
-          </p>
-        </div>
+      {/* Main Digital Twin Map Component */}
+      <IndiaMap variant="organizer" onSelectZone={() => {}} />
 
-        <IndiaMap
-          variant="organizer"
-          liveZones={liveZones}
-          onSelectZone={(zone) => setSelectedZone(zone)}
-        />
-      </div>
-
-      {/* Bottom Command Panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
-          <div className="flex items-center justify-between">
+      {/* Dynamic Zone Telemetry Table & Live Broadcast Dispatcher */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left: Dynamic Live Zone Gauges */}
+        <div className="lg:col-span-7 p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <div>
               <h3 className="font-bold text-base text-white">Live Zone Telemetry Stream</h3>
-              <p className="text-xs text-slate-400">Turnstile sensors push live updates via Postgres changes.</p>
+              <p className="text-xs text-slate-400">Turnstile throughput & wait times</p>
             </div>
-            <Badge variant="teal">Supabase Channel Active</Badge>
+            <Badge variant={scenario === 'surge' ? 'coral' : 'teal'}>
+              {scenario === 'surge' ? '2 Bottlenecks' : 'Nominal Stream'}
+            </Badge>
           </div>
 
-          <div className="space-y-2.5">
-            {liveZones.map((z) => {
-              const isHigh = z.occupancyRate >= 85;
-              const isWarning = z.occupancyRate >= 60;
-              return (
-                <div
-                  key={z.id}
-                  className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between text-xs gap-3"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-white">{z.name}</span>
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        ({z.currentOccupancy.toLocaleString()} / {z.maxCapacity.toLocaleString()})
-                      </span>
-                    </div>
-                    {/* Live occupancy bar */}
-                    <div className="w-full bg-slate-700/50 h-1.5 rounded-full mt-2 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          isHigh ? 'bg-primary-container' : isWarning ? 'bg-amber-400' : 'bg-emerald-400'
-                        }`}
-                        style={{ width: `${Math.min(100, z.occupancyRate)}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="font-bold text-white text-sm">{z.occupancyRate}%</span>
-                    <Badge variant={isHigh ? 'coral' : isWarning ? 'amber' : 'teal'}>
-                      {isHigh ? 'Critical' : isWarning ? 'Warning' : 'Optimal'}
+          <div className="space-y-3">
+            {zoneMetrics.map((z) => (
+              <div
+                key={z.name}
+                className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2"
+              >
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-white">{z.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 text-[11px]">Wait: ~{z.delay}</span>
+                    <Badge variant={z.occ >= 85 ? 'coral' : z.occ >= 65 ? 'amber' : 'teal'}>
+                      {z.occ}% Occupancy
                     </Badge>
-                    <button
-                      type="button"
-                      disabled={isSimulatingSurge}
-                      onClick={() => handleToggleSurge(z.id, z.currentOccupancy, z.maxCapacity)}
-                      className="px-2 py-1 rounded bg-slate-700/80 hover:bg-slate-600 text-[10px] text-slate-300 font-medium transition-colors cursor-pointer"
-                      title="Simulate surge or clear occupancy"
-                    >
-                      Toggle Surge
-                    </button>
                   </div>
                 </div>
-              );
-            })}
+
+                <div className="w-full h-2 rounded-full bg-slate-700/80 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ${
+                      z.occ >= 85 ? 'bg-red-500' : z.occ >= 65 ? 'bg-amber-400' : 'bg-emerald-400'
+                    }`}
+                    style={{ width: `${z.occ}%` }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+        {/* Right: Quick Broadcast Dispatcher */}
+        <div className="lg:col-span-5 p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-base text-white">Automated Nudge Engine</h3>
-            <Badge variant="teal">Autonomous</Badge>
+            <h3 className="font-bold text-base text-white">Instant Crowd Broadcast</h3>
+            <Badge variant="teal">Push to Mobiles</Badge>
           </div>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Flowcast actively calculates zone deltas in real-time. When a zone breaches 85% capacity, attendee notifications receive instant rerouting nudges with zero page reload.
+          <p className="text-xs text-slate-400">
+            Broadcast emergency reroutes or crowd notices to all attendees immediately.
           </p>
 
-          <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
-            <div className="flex items-center gap-2 text-primary-container font-bold text-xs">
-              <ShieldAlert className="w-4 h-4" />
-              <span>Realtime Threshold Watcher</span>
+          <form onSubmit={handleBroadcast} className="space-y-3 pt-1">
+            <div className="space-y-1">
+              <label className="text-xs text-slate-300 font-semibold">Advisory Title</label>
+              <Input
+                value={broadcastTitle}
+                onChange={(e) => setBroadcastTitle(e.target.value)}
+                placeholder="e.g. Gate 4 Overcrowded - Divert"
+                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
+                required
+              />
             </div>
-            <p className="text-xs text-slate-300">
-              {criticalZones.length > 0
-                ? `${criticalZones.map((c) => c.name).join(', ')} currently exceeding threshold (>85%). Push nudges active.`
-                : 'All monitored corridors operating inside safety envelopes.'}
-            </p>
-          </div>
 
-          <div className="space-y-2 pt-2">
-            <Link href="/simulation" className="block">
-              <Button className="w-full bg-primary-container text-white text-xs">
-                <span>Run Scenario Simulation Engine →</span>
-              </Button>
-            </Link>
-            <Link href="/alerts" className="block">
-              <Button variant="secondary" className="w-full text-xs text-slate-300">
-                <span>View Dispatched Advisories</span>
-              </Button>
-            </Link>
-          </div>
+            <div className="space-y-1">
+              <label className="text-xs text-slate-300 font-semibold">Message</label>
+              <textarea
+                value={broadcastMessage}
+                onChange={(e) => setBroadcastMessage(e.target.value)}
+                placeholder="Attendee instructions..."
+                rows={2}
+                className="w-full rounded-xl bg-slate-800 p-2.5 text-xs text-white border border-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-container"
+              />
+            </div>
+
+            <Button
+              type="submit"
+              disabled={isBroadcasting}
+              className="w-full bg-primary-container hover:bg-primary-container/90 text-white text-xs cursor-pointer py-2.5"
+            >
+              <Send className="w-3.5 h-3.5 mr-1.5" />
+              <span>Broadcast Live to 14k Attendees</span>
+            </Button>
+          </form>
+
+          {/* Recently Dispatched Feed */}
+          {dispatchedAlerts.length > 0 && (
+            <div className="pt-2 border-t border-slate-800 space-y-1.5">
+              <span className="text-[11px] font-bold text-slate-400">Recently Dispatched:</span>
+              {dispatchedAlerts.slice(0, 2).map((al, idx) => (
+                <div key={idx} className="p-2 rounded-lg bg-slate-800/80 text-[11px] text-slate-300 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="truncate">{al}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -50,7 +50,7 @@ export default function SignupPage() {
     setAuthError(null);
     setSuccessMessage(null);
 
-    // Validation checks BEFORE submitting to Supabase
+    // Validation checks BEFORE submitting
     if (!validate()) {
       return;
     }
@@ -58,82 +58,47 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      const supabase = createClient();
-      const cleanEmail = email.trim();
+      const cleanEmail = email.trim().toLowerCase();
       const cleanName = fullName.trim();
 
-      // 1. Supabase Auth signUp
-      const { data, error } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password,
-        options: {
-          data: {
-            full_name: cleanName,
-            role: 'attendee',
-          },
-        },
+      // 1. Register through backend API (uses Supabase Admin to bypass email rate limits)
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          password,
+          fullName: cleanName,
+          role: 'attendee',
+        }),
       });
 
-      if (error) {
-        setAuthError(error.message || 'Unable to complete registration');
-        setLoading(false);
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || 'Unable to complete registration');
+      }
+
+      // 2. Sign in to establish client session
+      const supabase = createClient();
+      const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
+
+      if (signInErr) {
+        setSuccessMessage('Account created successfully! Redirecting to login...');
+        setTimeout(() => {
+          router.push('/login');
+        }, 1200);
         return;
       }
 
-      const user = data.user;
-      if (!user) {
-        setAuthError('Registration completed but user object was not returned.');
-        setLoading(false);
-        return;
-      }
-
-      // 2. Insert matching row into public.users with role='attendee'
-      try {
-        await (supabase.from('users') as any).upsert({
-          id: user.id,
-          email: user.email || cleanEmail,
-          full_name: cleanName,
-          role: 'attendee',
-          updated_at: new Date().toISOString(),
-        });
-      } catch (dbErr) {
-        console.warn('Client upsert to public.users warning:', dbErr);
-      }
-
-      // 3. Trigger backend auto-confirm helper so the attendee can proceed immediately
-      try {
-        await fetch('/api/auth/confirm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: user.id,
-            email: cleanEmail,
-            fullName: cleanName,
-          }),
-        });
-      } catch (confirmErr) {
-        console.warn('Auto-confirm helper note:', confirmErr);
-      }
-
-      // 4. If session exists or signin works, redirect to onboarding
-      if (data.session) {
+      if (signInData.session) {
         router.push('/onboarding/step-1');
         router.refresh();
       } else {
-        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password,
-        });
-
-        if (!signInErr && signInData.session) {
-          router.push('/onboarding/step-1');
-          router.refresh();
-        } else {
-          setSuccessMessage('Account created successfully! You can now log in.');
-          setTimeout(() => {
-            router.push('/login');
-          }, 1500);
-        }
+        router.push('/dashboard');
+        router.refresh();
       }
     } catch (err: any) {
       setAuthError(err?.message || 'Unexpected error during signup');
